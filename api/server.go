@@ -29,17 +29,23 @@ func NewServer(config util.Config, store db.Store) (*Server, error) {
 		tokenMaker: tokenMaker,
 	}
 
+	server.setupRouter()
+
+	return server, nil
+}
+
+func (server *Server) setupRouter() {
 	router := gin.Default()
 
 	// add routes to router
 	router.POST("/accounts", server.createAccount)
 	router.POST("/users", server.createUser)
+	router.POST("/users/login", server.loginUser)
 	router.GET("/accounts/:id", server.getAccount)
 	router.GET("/accounts", server.listAccount)
 	router.POST("/transfers", server.createTransfer)
 
 	server.router = router
-	return server, nil
 }
 
 // Start runs the HTTP server on a specific address.
