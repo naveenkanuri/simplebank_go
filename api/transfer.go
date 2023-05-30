@@ -39,8 +39,9 @@ func (server *Server) createTransfer(ctx *gin.Context) {
 		return
 	}
 
-	amount, err := server.handleCurrency(ctx, fromAccount, toAccount, req.Amount)
+	amount, err := handleCurrency(fromAccount, toAccount, req.Amount)
 	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, errorResponse(err))
 		return
 	}
 
@@ -104,17 +105,15 @@ func (server *Server) validAccount(ctx *gin.Context, accountID int64) (db.Accoun
 	return account, true
 }
 
-func (server *Server) handleCurrency(ctx *gin.Context, fromAccount db.Account, toAccount db.Account, amountToTransfer int64) (amount int64, err error) {
+func handleCurrency(fromAccount db.Account, toAccount db.Account, amountToTransfer int64) (amount int64, err error) {
 	if fromAccount.Currency != toAccount.Currency {
 		amount, err = convertToUSD(amountToTransfer, fromAccount.Currency)
 		if err != nil {
-			ctx.JSON(http.StatusInternalServerError, errorResponse(err))
-			return
+			return 0, err
 		}
 		amount, err = convertFromUSD(amount, toAccount.Currency)
 		if err != nil {
-			ctx.JSON(http.StatusInternalServerError, errorResponse(err))
-			return
+			return 0, err
 		}
 	} else {
 		amount = amountToTransfer
