@@ -2,11 +2,12 @@ package api
 
 import (
 	"database/sql"
-	"log"
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 	db "github.com/naveenkanuri/simplebank/db/sqlc"
+	"github.com/naveenkanuri/simplebank/token"
 )
 
 type transferAccountRequest struct {
@@ -22,7 +23,23 @@ func (server *Server) createTransfer(ctx *gin.Context) {
 		return
 	}
 
-	amount, err := server.handleCurrency(ctx, req.FromAccountID, req.ToAccountID, req.Amount)
+	fromAccount, valid := server.validAccount(ctx, req.FromAccountID)
+	if !valid {
+		return
+	}
+	authPayload := ctx.MustGet(authoriztionPayloadKey).(*token.Payload)
+	if fromAccount.Owner != authPayload.Username {
+		err := errors.New("from account doesn't belong to the authenticated user")
+		ctx.JSON(http.StatusUnauthorized, errorResponse(err))
+		return
+	}
+
+	toAccount, valid := server.validAccount(ctx, req.ToAccountID)
+	if !valid {
+		return
+	}
+
+	amount, err := server.handleCurrency(ctx, fromAccount, toAccount, req.Amount)
 	if err != nil {
 		return
 	}
@@ -74,40 +91,27 @@ func convertFromUSD(amount int64, currency string) (int64, error) {
 	}
 }
 
-func (server *Server) handleCurrency(ctx *gin.Context, fromAccountID int64, toAccountID int64, amountToTransfer int64) (amount int64, err error) {
-	fromAccount, err := server.store.GetAccount(ctx, fromAccountID)
+func (server *Server) validAccount(ctx *gin.Context, accountID int64) (db.Account, bool) {
+	account, err := server.store.GetAccount(ctx, accountID)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			ctx.JSON(http.StatusNotFound, errorResponse(err))
-			return
+			return account, false
 		}
 		ctx.JSON(http.StatusInternalServerError, errorResponse(err))
-		return
+		return account, false
 	}
+	return account, true
+}
 
-	toAccount, err := server.store.GetAccount(ctx, toAccountID)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			ctx.JSON(http.StatusNotFound, errorResponse(err))
-			return
-		}
-		ctx.JSON(http.StatusInternalServerError, errorResponse(err))
-		return
-	}
-
-	log.Printf("From Account Currency: %s", fromAccount.Currency)
-	log.Printf("To Account Currency: %s", toAccount.Currency)
-
+func (server *Server) handleCurrency(ctx *gin.Context, fromAccount db.Account, toAccount db.Account, amountToTransfer int64) (amount int64, err error) {
 	if fromAccount.Currency != toAccount.Currency {
-		log.Printf("Converting currency from %s to %s", fromAccount.Currency, toAccount.Currency)
 		amount, err = convertToUSD(amountToTransfer, fromAccount.Currency)
-		log.Printf("Converted amount to USD: %d", amount)
 		if err != nil {
 			ctx.JSON(http.StatusInternalServerError, errorResponse(err))
 			return
 		}
 		amount, err = convertFromUSD(amount, toAccount.Currency)
-		log.Printf("Converted amount from USD: %d", amount)
 		if err != nil {
 			ctx.JSON(http.StatusInternalServerError, errorResponse(err))
 			return
